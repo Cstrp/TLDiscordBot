@@ -27,7 +27,7 @@ export class DiscordService {
     private readonly cfg: ConfigService,
   ) {}
 
-  @Cron('0 9 * * 4') // EVERY TU AT 9 AM
+  @Cron('0 9 * * 4') // EVERY HOUR ON THURSDAYS STARTING AT 9:00 AM
   public async onSchedule() {
     if (this.stopJob) {
       this.logger.verbose(
@@ -45,27 +45,20 @@ export class DiscordService {
     this.logger.verbose(`Bot logged in as ${ctx.user.username}`);
   }
 
-  @On('interactionCreate')
-  public async onInteractionCreate(
-    @Context() [interaction]: ContextOf<'interactionCreate'>,
-  ): Promise<void> {
-    if (!interaction.isAutocomplete()) return;
-    const focusedOption = interaction.options.getFocused(true);
-    let choices: string[] = [];
-    if (focusedOption.name === 'region') {
-      const focusedValue = focusedOption.value as string;
-      choices = Object.values(REGIONS)
-        .filter((region) =>
-          region.toLowerCase().includes(focusedValue.toLowerCase()),
-        )
-        .map((region) => region);
+  @SlashCommand({
+    name: 'health',
+    description: 'Check bot health ',
+  })
+  public async onHealth(@Context() [ctx]: SlashCommandContext) {
+    try {
+      if (typeof ctx.deferReply === 'function') {
+        await ctx.deferReply();
+      }
+
+      await ctx.reply('Bot is healthy');
+    } catch (error) {
+      this.logger.error(error);
     }
-    await interaction.respond(
-      choices.slice(0, 25).map((choice) => ({
-        name: choice.toUpperCase(),
-        value: choice,
-      })),
-    );
   }
 
   @SlashCommand({
@@ -155,6 +148,32 @@ export class DiscordService {
         'An error occurred while fetching the server status. Please try again later.',
       );
     }
+  }
+
+  @On('interactionCreate')
+  public async onInteractionCreate(
+    @Context() [interaction]: ContextOf<'interactionCreate'>,
+  ): Promise<void> {
+    if (!interaction.isAutocomplete()) return;
+
+    const focusedOption = interaction.options.getFocused(true);
+    let choices: string[] = [];
+
+    if (focusedOption.name === 'region') {
+      const focusedValue = focusedOption.value as string;
+      choices = Object.values(REGIONS)
+        .filter((region) =>
+          region.toLowerCase().includes(focusedValue.toLowerCase()),
+        )
+        .map((region) => region);
+    }
+
+    await interaction.respond(
+      choices.slice(0, 25).map((choice) => ({
+        name: choice.toUpperCase(),
+        value: choice,
+      })),
+    );
   }
 
   private async sendMessage(message: string): Promise<void> {
