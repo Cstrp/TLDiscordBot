@@ -51,10 +51,6 @@ export class DiscordService {
   })
   public async onHealth(@Context() [ctx]: SlashCommandContext) {
     try {
-      if (typeof ctx.deferReply === 'function') {
-        await ctx.deferReply();
-      }
-
       await ctx.reply('Bot is healthy');
     } catch (error) {
       this.logger.error(error);
