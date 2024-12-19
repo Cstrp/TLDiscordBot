@@ -5,6 +5,7 @@ import { GatewayIntentBits } from 'discord.js';
 import { NecordModule } from 'necord';
 
 import { DiscordModule } from './discord/discord.module';
+import { MistralModule } from './mistral/mistral.module';
 import { TlModule } from './tl/tl.module';
 @Module({
   imports: [
@@ -19,7 +20,7 @@ import { TlModule } from './tl/tl.module';
         development: [cfg.get('DISCORD_DEV_GUILD_ID')],
       }),
     }),
-
+    MistralModule,
     DiscordModule,
     TlModule,
   ],
