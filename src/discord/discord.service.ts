@@ -27,7 +27,7 @@ export class DiscordService {
     private readonly cfg: ConfigService,
   ) {}
 
-  @Cron('0 9 * * 4') // EVERY HOUR ON THURSDAYS STARTING AT 9:00 AM
+  @Cron('0 * * * 4') // EVERY HOUR ON THURSDAYS
   public async onSchedule() {
     if (this.stopJob) {
       this.logger.verbose(
@@ -51,7 +51,7 @@ export class DiscordService {
   })
   public async onHealth(@Context() [ctx]: SlashCommandContext) {
     try {
-      await ctx.reply('Bot is healthy');
+      await ctx.editReply('Bot is healthy');
     } catch (error) {
       this.logger.error(error);
     }
@@ -72,13 +72,19 @@ export class DiscordService {
         await ctx.deferReply();
       }
 
-      const selectedRegion = (await ctx.options.getString('region')) as REGIONS;
+      const selectedRegion = region as REGIONS;
 
-      if (!selectedRegion) return;
+      if (!selectedRegion) {
+        await ctx.editReply('Invalid region specified.');
+        return;
+      }
 
       const result = await this.tl.getServerStatus(selectedRegion);
 
-      if (!result) return;
+      if (!result) {
+        await ctx.editReply('No server status data available.');
+        return;
+      }
 
       const operationalServers: string[] = [];
       const serversInMaintenance: string[] = [];
@@ -137,10 +143,10 @@ export class DiscordService {
         });
       }
 
-      await this.sendMessage(reply);
+      await ctx.editReply(reply);
     } catch (error) {
       this.logger.error(`Error responding to /check command: ${error.message}`);
-      await this.sendMessage(
+      await ctx.editReply(
         'An error occurred while fetching the server status. Please try again later.',
       );
     }
