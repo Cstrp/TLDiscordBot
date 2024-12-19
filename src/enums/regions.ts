@@ -3,5 +3,5 @@ export enum REGIONS {
   EASTERN_USA = 'eastern-americas',
   SOUTH_AMERICA = 'south-america',
   EUROPE = 'europe',
-  JAPAN = 'japan',
+  JAPAN = 'japan-oceania',
 }
