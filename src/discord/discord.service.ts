@@ -50,6 +50,10 @@ export class DiscordService {
     description: 'Check bot health ',
   })
   public async onHealth(@Context() [ctx]: SlashCommandContext) {
+    if (typeof ctx.deferReply === 'function') {
+      await ctx.deferReply();
+    }
+
     try {
       await ctx.editReply('Bot is healthy');
     } catch (error) {
@@ -65,8 +69,6 @@ export class DiscordService {
     @Context() [ctx]: SlashCommandContext,
     @Options() { region }: RegionOptionsDto,
   ) {
-    this.logger.verbose(`Selected region ${region}`);
-
     try {
       if (typeof ctx.deferReply === 'function') {
         await ctx.deferReply();
@@ -74,15 +76,18 @@ export class DiscordService {
 
       const selectedRegion = region as REGIONS;
 
-      if (!selectedRegion) {
-        await ctx.editReply('Invalid region specified.');
-        return;
-      }
-
       const result = await this.tl.getServerStatus(selectedRegion);
 
-      if (!result) {
-        await ctx.editReply('No server status data available.');
+      if (
+        !result ||
+        !result[selectedRegion] ||
+        !result[selectedRegion].servers
+      ) {
+        if (typeof ctx.editReply === 'function') {
+          await ctx.editReply(
+            'No server data available for the selected region. Please try again later.',
+          );
+        }
         return;
       }
 
@@ -143,12 +148,16 @@ export class DiscordService {
         });
       }
 
-      await ctx.editReply(reply);
+      if (typeof ctx.editReply === 'function') {
+        await ctx.editReply(reply);
+      }
     } catch (error) {
       this.logger.error(`Error responding to /check command: ${error.message}`);
-      await ctx.editReply(
-        'An error occurred while fetching the server status. Please try again later.',
-      );
+      if (typeof ctx.editReply === 'function') {
+        await ctx.editReply(
+          'An error occurred while fetching the server status. Please try again later.',
+        );
+      }
     }
   }
 
