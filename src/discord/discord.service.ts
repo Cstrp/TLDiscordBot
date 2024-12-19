@@ -54,6 +54,11 @@ export class DiscordService {
     return ctx.reply({ content });
   }
 
+  @Cron('0 0 * * * 5')
+  public async onResetJob() {
+    this.stopJob = false;
+  }
+
   @Cron('0 */30 * * * 4') // EVERY 30 MINUTES ON THURSDAYS
   public async onCheckSilent() {
     if (this.stopJob) {
@@ -67,6 +72,7 @@ export class DiscordService {
 
     if (result.includes('✅ All servers are in good condition.')) {
       this.sendMessage(result);
+      this.stopJob = true;
     } else {
       this.logger.warn('Some servers are not in good condition.');
     }
