@@ -1,25 +1,49 @@
 import { Injectable, Logger } from '@nestjs/common';
-import axios from 'axios';
-import { HTMLElement, parse } from 'node-html-parser';
+import { ConfigService } from '@nestjs/config';
 import { CATEGORY } from 'src/enums/category';
 import { REGIONS } from 'src/enums/regions';
 import { Article } from 'src/types/article';
 import { ServerStatus } from 'src/types/server-status';
+import { getArticle } from 'src/utils/get-article';
+import { getNews } from 'src/utils/get-news';
+import { getRegionDiv } from 'src/utils/get-region-div';
+import { getUpcomingDayNightTimes } from 'src/utils/get-upcoming-day-night-times';
+import { parseServers } from 'src/utils/parse-servers';
+import { fetchPage } from './../utils/fetch-page';
 
 @Injectable()
 export class TlService {
   private readonly logger: Logger = new Logger(TlService.name);
 
-  constructor() {}
+  constructor(private readonly cfg: ConfigService) {
+    this.getRainSchedule();
+  }
+
+  public async getRainSchedule(): Promise<void> {
+    try {
+      getUpcomingDayNightTimes();
+    } catch (error) {
+      this.logger.error('Error fetching rain schedule:', error.message);
+    }
+  }
+
+  public async getNightSchedule(): Promise<void> {
+    // const url = this.cfg.get<string>('NIGHT_SCHEDULE_URL') ?? '';
+    // TODO: Implement this method
+  }
 
   public async getGeneralNews(): Promise<Article[]> {
-    const news = await this.getNews(CATEGORY.GENERAL);
+    const baseUrl = this.cfg.get<string>('TL_NEWS_URL') ?? '';
+
+    const news = await getNews(baseUrl, this.logger, CATEGORY.GENERAL);
 
     return news;
   }
 
   public async getUpdates(): Promise<Article[]> {
-    const updates = await this.getNews(CATEGORY.UPDATES);
+    const baseUrl = this.cfg.get<string>('TL_NEWS_URL') ?? '';
+
+    const updates = await getNews(baseUrl, this.logger, CATEGORY.UPDATES);
 
     return updates;
   }
@@ -34,8 +58,8 @@ export class TlService {
 
     const { link } = latestUpdate;
 
-    const htmlContent = await this.fetchPage(link);
-    const article = this.getArticle(htmlContent);
+    const htmlContent = await fetchPage(link);
+    const article = getArticle(htmlContent);
 
     if (!article) {
       throw new Error('No article found');
@@ -47,11 +71,10 @@ export class TlService {
   }
 
   public async getServerStatus(region?: REGIONS): Promise<ServerStatus> {
-    const tl =
-      'https://www.playthroneandliberty.com/en-us/support/server-status';
+    const url = this.cfg.get<string>('TL_SERVER_STATUS_URL') ?? '';
 
     try {
-      const htmlContent = await this.fetchPage(tl);
+      const htmlContent = await fetchPage(url);
 
       if (!htmlContent) {
         throw new Error('Failed to fetch page');
@@ -64,14 +87,14 @@ export class TlService {
       const result = {} as ServerStatus;
 
       for (const reg of Object.values(REGIONS)) {
-        const regionDiv = this.getRegionDiv(htmlContent, reg);
+        const regionDiv = getRegionDiv(htmlContent, reg);
 
         if ((region && reg !== region) || !regionDiv) {
           continue;
         }
 
         result[reg] = {
-          servers: this.parseServers(regionDiv),
+          servers: parseServers(regionDiv),
           timestamp: new Date().toISOString(),
         };
       }
@@ -81,142 +104,5 @@ export class TlService {
       this.logger.error('Error fetching server status:', error);
       throw error;
     }
-  }
-
-  private async getNews(
-    categoryFilter?: string,
-    limit: number = 5,
-  ): Promise<Article[]> {
-    const baseUrl =
-      'https://www.playthroneandliberty.com/en-us/news-load-more?page=';
-    const allArticles: Article[] = [];
-
-    try {
-      for (let page = 1; page <= 2; page++) {
-        const url = `${baseUrl}${page}`;
-        this.logger.debug(`Fetching page ${page}`);
-
-        const htmlContent = await this.fetchPage(url);
-        if (!htmlContent) {
-          break;
-        }
-
-        const articles = this.parseArticles(htmlContent);
-        if (articles.length === 0) {
-          this.logger.debug(`No articles found on page ${page}. Stopping.`);
-          break;
-        }
-
-        allArticles.push(...articles);
-      }
-
-      let filteredArticles = allArticles;
-      if (categoryFilter) {
-        filteredArticles = allArticles.filter(
-          (article) =>
-            article.category.toLowerCase() === categoryFilter.toLowerCase(),
-        );
-
-        this.logger.debug(
-          `Filtered articles for category '${categoryFilter}': ${filteredArticles.length}`,
-        );
-      }
-
-      return filteredArticles.slice(0, limit);
-    } catch (error) {
-      this.logger.error('Error fetching news:', error);
-      throw error;
-    }
-  }
-
-  private async fetchPage(url: string): Promise<string> {
-    try {
-      const { data } = await axios.get<string>(url);
-
-      return data;
-    } catch (error) {
-      this.logger.error('Error fetching page:', error);
-      throw new Error('Failed to fetch page content');
-    }
-  }
-
-  private getArticle(htmlContent: string): HTMLElement | null {
-    const root = parse(htmlContent);
-    return root.querySelector('article');
-  }
-
-  private getRegionDiv(
-    htmlContent: string,
-    region: string,
-  ): HTMLElement | null {
-    const root = parse(htmlContent);
-    return root.querySelector(
-      `div[data-regionid="${region}"]`,
-    ) as HTMLElement | null;
-  }
-
-  private parseServers(
-    regionDiv: HTMLElement,
-  ): { name: string; status: string }[] {
-    const servers: { name: string; status: string }[] = [];
-
-    const serverItems = regionDiv.querySelectorAll(
-      'div.ags-ServerStatus-content-serverStatuses-server-item',
-    ) as HTMLElement[];
-
-    serverItems.forEach((serverItem) => {
-      const nameElement = serverItem.querySelector(
-        'span.ags-ServerStatus-content-serverStatuses-server-item-label',
-      ) as HTMLElement;
-
-      const name = nameElement?.innerText.trim() || 'Unknown';
-
-      const statusSvg = serverItem.querySelector('svg')?.innerHTML ?? '';
-      const status = this.determineStatus(statusSvg);
-
-      servers.push({ name, status });
-    });
-
-    return servers;
-  }
-
-  private parseArticles(htmlContent: string): Article[] {
-    const root = parse(htmlContent);
-    const articles: Article[] = [];
-
-    const articleElements = root.querySelectorAll('div.ags-SlotModule');
-
-    articleElements.forEach((article) => {
-      const href = article.querySelector('a.ags-SlotModule-slotLink')
-        ?.attributes.href;
-      const title = article
-        .querySelector('.ags-SlotModule-slotLink-info-heading--blog')
-        ?.innerText.trim();
-      const category = article
-        .querySelector('.ags-SlotModule-slotLink-info-subheading--featured')
-        ?.innerText.trim();
-      const description = article
-        .querySelector('.ags-SlotModule-slotLink-info-text--blog')
-        ?.innerText.trim();
-
-      if (href && title && category && description) {
-        articles.push({
-          link: `https://www.playthroneandliberty.com${href}`,
-          title,
-          category,
-          description,
-        });
-      }
-    });
-
-    return articles;
-  }
-
-  private determineStatus(svgContent: string): string {
-    if (svgContent.includes('24FF00')) return 'Good';
-    if (svgContent.includes('FFF500')) return 'Busy';
-    if (svgContent.includes('FF0000')) return 'Full';
-    if (svgContent.includes('00F0FF')) return 'In-Maintenance';
-    return 'Unknown';
   }
 }

@@ -19,6 +19,7 @@ import { TlService } from 'src/tl/tl.service';
 import { Article } from 'src/types/article';
 import { CategoryOptionsDto } from './dto/category.dto';
 import { RegionOptionsDto } from './dto/options.dto';
+import { ScheduleOptionsDto } from './dto/schedule.dto';
 import { CategoryAutocompleteInterceptor } from './interceptors/category.interceptor';
 import { RegionAutocompleteInterceptor } from './interceptors/region.interceptor';
 
@@ -79,7 +80,7 @@ export class DiscordService {
   }
 
   @Cron('0 * * * 4') // EVERY HOUR ON THURSDAYS
-  public async onSchedule() {
+  public async onCheckServerStatus() {
     if (this.stopJob) {
       this.logger.verbose(
         'All servers are in good condition. Cron task aborted.',
@@ -88,6 +89,21 @@ export class DiscordService {
     }
     const result = await this.checkServerStatus();
     this.sendMessage(result);
+  }
+
+  @SlashCommand({
+    name: 'schedule',
+    description: 'Get schedule (rain | night)',
+  })
+  public async onSchedule(
+    @Context() [ctx]: SlashCommandContext,
+    @Options() { type }: ScheduleOptionsDto,
+  ) {
+    try {
+      await ctx.deferReply();
+    } catch (error) {
+      this.logger.error(error);
+    }
   }
 
   @SlashCommand({
@@ -369,122 +385,3 @@ export class DiscordService {
     return message;
   }
 }
-
-//   @SlashCommand({
-//     name: 'get_latest_update',
-//     description: 'Get latest update',
-//   })
-//   public async onGetLatestUpdate(@Context() [ctx]: SlashCommandContext) {
-//     if (typeof ctx.deferReply === 'function') {
-//       ctx.deferReply().catch((error) => {
-//         this.logger.error(error);
-//       });
-//     }
-
-//     try {
-//       const latestUpdate = await this.tl.getLatestUpdate();
-
-//       const translatedUpdate = await this.mistral.translateNews(latestUpdate);
-//       const chunks = this.splitTextIntoChunks(translatedUpdate);
-
-//       for (const chunk of chunks) {
-//         await ctx.reply({
-//           content: chunk,
-//           options: {
-//             tts: false,
-//             allowedMentions: { parse: [] },
-//             fetchReply: true,
-//           },
-//         });
-//       }
-//     } catch (error) {
-//       this.logger.error(error);
-//     }
-//   }
-
-//   @SlashCommand({
-//     name: 'check',
-//     description: 'Check TL server statuses for a specific region',
-//   })
-//   public async onSlashCheck(
-//     @Context() [ctx]: SlashCommandContext,
-//     @Options() { region }: RegionOptionsDto,
-//   ) {
-
-//   }
-
-//   @On('interactionCreate')
-//   public async onInteractionCreate(
-//     @Context() [interaction]: ContextOf<'interactionCreate'>,
-//   ): Promise<void> {
-//     if (!interaction.isAutocomplete()) return;
-
-//     const focusedOption = interaction.options.getFocused(true);
-//     let choices: string[] = [];
-
-//     if (focusedOption.name === 'region') {
-//       const focusedValue = focusedOption.value as string;
-//       choices = Object.values(REGIONS)
-//         .filter((region) =>
-//           region.toLowerCase().includes(focusedValue.toLowerCase()),
-//         )
-//         .map((region) => region);
-//     }
-
-//     await interaction.respond(
-//       choices.slice(0, 25).map((choice) => ({
-//         name: choice.toUpperCase(),
-//         value: choice,
-//       })),
-//     );
-//   }
-
-//   private async sendMessage(message: string): Promise<void> {
-//     if (!this.client || !this.client.channels) {
-//       this.logger.error(
-//         'Discord client is not ready or channels are not available.',
-//       );
-//       return;
-//     }
-
-//     try {
-//       await this.client.login();
-//       const channel_id = this.cfg.get('CHANNEL_ID') ?? '';
-//       const channel = (await this.client.channels.fetch(
-//         channel_id,
-//       )) as TextChannel;
-
-//       await channel.send(message);
-//     } catch (error) {
-//       this.logger.error(
-//         `Error while trying send message to Discord: ${error.message}`,
-//       );
-//     }
-//   }
-
-//   private splitTextIntoChunks(text: string): string[] {
-//     const maxLength = 2000;
-//     const chunks = [];
-//     let start = 0;
-
-//     while (start < text.length) {
-//       const end = Math.min(start + maxLength, text.length);
-
-//       let breakPoint = text.lastIndexOf('\n', end);
-
-//       if (breakPoint === -1 || breakPoint <= start) {
-//         breakPoint = end;
-//       }
-
-//       chunks.push(text.slice(start, breakPoint).trim());
-
-//       start = breakPoint;
-//     }
-
-//     return chunks.map((chunk) => {
-//       if (chunk.length > maxLength) {
-//         return chunk.slice(0, maxLength);
-//       }
-//       return chunk;
-//     });
-//   }
