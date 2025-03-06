@@ -7,6 +7,7 @@ import { NecordModule } from 'necord';
 import { DiscordModule } from './discord/discord.module';
 import { MistralModule } from './mistral/mistral.module';
 import { TlModule } from './tl/tl.module';
+import { LangchainModule } from './langchain/langchain.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ cache: false, isGlobal: true }),
@@ -23,6 +24,7 @@ import { TlModule } from './tl/tl.module';
     MistralModule,
     DiscordModule,
     TlModule,
+    LangchainModule,
   ],
   controllers: [],
   providers: [],

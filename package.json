@@ -20,6 +20,9 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@langchain/community": "^0.3.34",
+    "@langchain/core": "^0.3.42",
+    "@langchain/mistralai": "^0.2.0",
     "@mistralai/mistralai": "^1.3.5",
     "@nestjs/common": "^10.0.0",
     "@nestjs/config": "^3.3.0",
@@ -29,6 +32,8 @@
     "@nestjs/schedule": "^4.1.1",
     "axios": "^1.7.9",
     "discord.js": "^14.16.3",
+    "duck-duck-scrape": "^2.2.7",
+    "langchain": "^0.3.19",
     "necord": "^6.8.6",
     "node-html-parser": "^6.1.13",
     "reflect-metadata": "^0.2.0",

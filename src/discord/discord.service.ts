@@ -2,10 +2,10 @@ import { Injectable, Logger, UseInterceptors } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { Client, TextChannel } from 'discord.js';
+
 import {
   Context,
   ContextOf,
-  On,
   Once,
   Options,
   SlashCommand,
@@ -14,12 +14,13 @@ import {
 import { CATEGORY } from 'src/enums/category';
 import { REGIONS } from 'src/enums/regions';
 import { STATUS } from 'src/enums/status';
+import { LangchainService } from 'src/langchain/langchain.service';
 import { MistralService } from 'src/mistral/mistral.service';
 import { TlService } from 'src/tl/tl.service';
 import { Article } from 'src/types/article';
 import { CategoryOptionsDto } from './dto/category.dto';
 import { RegionOptionsDto } from './dto/options.dto';
-import { ScheduleOptionsDto } from './dto/schedule.dto';
+import { SearchOptionsDto } from './dto/search-options.dto';
 import { CategoryAutocompleteInterceptor } from './interceptors/category.interceptor';
 import { RegionAutocompleteInterceptor } from './interceptors/region.interceptor';
 
@@ -29,10 +30,11 @@ export class DiscordService {
   private stopJob: boolean = false;
 
   constructor(
+    private readonly langchain: LangchainService,
     private readonly mistral: MistralService,
     private readonly tlService: TlService,
-    private readonly client: Client,
     private readonly cfg: ConfigService,
+    private readonly client: Client,
   ) {}
 
   @Once('ready')
@@ -40,7 +42,7 @@ export class DiscordService {
     this.logger.verbose(`Bot logged in as ${ctx.user.username}`);
   }
 
-  @On('warn')
+  @Once('warn')
   public onWarn(@Context() [message]: ContextOf<'warn'>) {
     this.logger.warn(message);
   }
@@ -60,7 +62,7 @@ export class DiscordService {
     this.stopJob = false;
   }
 
-  @Cron('0 */30 * * * 4') // EVERY 30 MINUTES ON THURSDAYS
+  @Cron('0 */30 * * * 4')
   public async onCheckSilent() {
     if (this.stopJob) {
       this.logger.verbose(
@@ -79,30 +81,44 @@ export class DiscordService {
     }
   }
 
-  @Cron('0 * * * 4') // EVERY HOUR ON THURSDAYS
-  public async onCheckServerStatus() {
+  @Cron('0 */30 * * * 4', { name: 'checkServerStatus' })
+  public async checkServerStatusCron() {
     if (this.stopJob) {
-      this.logger.verbose(
-        'All servers are in good condition. Cron task aborted.',
+      this.logger.debug(
+        'Check skipped: All servers previously confirmed operational',
       );
       return;
     }
-    const result = await this.checkServerStatus();
-    this.sendMessage(result);
+
+    const statusMessage = await this.checkServerStatus();
+    await this.sendMessage(statusMessage);
   }
 
   @SlashCommand({
-    name: 'schedule',
-    description: 'Get schedule (rain | night)',
+    name: 'search',
+    description: 'Grant AI network access, and get some info from duck-duck-go',
   })
-  public async onSchedule(
+  public async onSearch(
     @Context() [ctx]: SlashCommandContext,
-    @Options() { type }: ScheduleOptionsDto,
+    @Options() { query }: SearchOptionsDto,
   ) {
     try {
       await ctx.deferReply();
+
+      const answer = await this.langchain.askQuestion(query);
+
+      const truncatedAnswer =
+        answer.length > 2000 ? answer.slice(0, 1997) + '...' : answer;
+
+      await ctx.editReply({ content: truncatedAnswer });
     } catch (error) {
-      this.logger.error(error);
+      this.logger.error(
+        `Error processing search command for query "${query}": ${error.message}`,
+        error.stack,
+      );
+      await ctx.editReply({
+        content: 'An error occured... please try again',
+      });
     }
   }
 
@@ -313,75 +329,107 @@ export class DiscordService {
     }
   }
 
-  private async sendMessage(message: string): Promise<void> {
-    if (!this.client || !this.client.channels) {
-      this.logger.error(
-        'Discord client is not ready or channels are not available.',
-      );
-      return;
-    }
+  private async checkServerStatus(): Promise<string> {
+    const region = REGIONS.EUROPE;
+    let statusMessage = `**Region: ${region.toUpperCase()}**\n\n`;
+
     try {
-      await this.client.login();
-      const channel_id = this.cfg.get('CHANNEL_ID') ?? '';
-      const channel = (await this.client.channels.fetch(
-        channel_id,
-      )) as TextChannel;
-      await channel.send(message);
+      const serverStatus = await this.tlService.getServerStatus(region);
+      if (!serverStatus || !serverStatus[region]?.servers) {
+        this.logger.warn(`No server data available for ${region}`);
+        return `${statusMessage}⚠️ No server data available at this time.`;
+      }
+
+      const servers = serverStatus[region].servers;
+      const operationalServers: string[] = [];
+      const maintenanceServers: string[] = [];
+
+      servers.forEach((server) => {
+        const statusLabel = this.getStatusLabel(server.status);
+        const formatted = `${server.name}: ${statusLabel}`;
+
+        if (server.status === 'Good') {
+          operationalServers.push(formatted);
+        } else if (server.status === 'In-Maintenance') {
+          maintenanceServers.push(formatted);
+        } else {
+          operationalServers.push(formatted);
+        }
+      });
+
+      if (maintenanceServers.length === servers.length) {
+        statusMessage += '🛠️ All servers are currently under maintenance.';
+        this.logger.warn('All servers are in maintenance');
+      } else if (operationalServers.length > 0) {
+        // Хотя бы один сервер активен
+        statusMessage += '🖥️ **Server Status**\n';
+        if (operationalServers.length > 0) {
+          statusMessage +=
+            '✅ Operational:\n' +
+            operationalServers.map((s) => `- ${s}`).join('\n') +
+            '\n';
+        }
+        if (maintenanceServers.length > 0) {
+          statusMessage +=
+            '🛠️ Maintenance:\n' +
+            maintenanceServers.map((s) => `- ${s}`).join('\n');
+        }
+        this.stopJob = servers.every((s) => s.status === 'Good');
+        this.logger.verbose(
+          `Server status: ${operationalServers.length} operational, ${maintenanceServers.length} in maintenance`,
+        );
+      } else {
+        statusMessage +=
+          '⚠️ Unexpected status: No operational servers detected.';
+        this.logger.warn('Unexpected server status configuration');
+      }
+
+      return statusMessage;
     } catch (error) {
-      this.logger.error('Error sending message:', error);
+      this.logger.error(
+        `Failed to check server status: ${error.message}`,
+        error.stack,
+      );
+      return `${statusMessage}❌ Error fetching server status.`;
     }
   }
 
-  private async checkServerStatus(): Promise<string> {
-    const defaultRegion = REGIONS.EUROPE;
-    const statuses = await this.tlService.getServerStatus(defaultRegion);
-    let condition = true;
+  private getStatusLabel(status: string): string {
+    return (
+      {
+        Good: STATUS.GOOD,
+        Busy: STATUS.BUSY,
+        Full: STATUS.FULL,
+        'In-Maintenance': STATUS.IN_MAINTENANCE,
+        Unknown: STATUS.UNKNOWN,
+      }[status] ?? STATUS.UNKNOWN
+    );
+  }
 
-    let message = `**Region:** ${defaultRegion}\n\n`;
-
-    const templates = {
-      GOOD: (serverName: string) => `___${serverName}___: ${STATUS.GOOD}.`,
-      MAINTENANCE: (serverName: string) =>
-        `___${serverName}___: ${STATUS.IN_MAINTENANCE}`,
-      BAD: (serverName: string, status: string) =>
-        `___${serverName}___ is experiencing issues. Status: ${status}`,
-    };
-
-    for (const { status, name } of statuses.europe.servers) {
-      switch (status) {
-        case 'Good':
-          message += templates.GOOD(name);
-          this.logger.warn(`Server ${name} is good.`);
-          break;
-        case 'In-Maintenance':
-          message += templates.MAINTENANCE(name);
-          this.logger.warn(`Server ${name} is in maintenance.`);
-          condition = false;
-          break;
-        default:
-          message += templates.BAD(name, status);
-          this.logger.warn(
-            `Server ${name} is not in good status. Status: ${status}`,
-          );
-          condition = false;
-          break;
-      }
-
-      message += '\n';
+  private async sendMessage(message: string): Promise<void> {
+    const channelId = this.cfg.get<string>('CHANNEL_ID');
+    if (!channelId) {
+      this.logger.error('CHANNEL_ID is not configured');
+      return;
     }
 
-    if (condition) {
-      message += '\n✅ All servers are in good condition.';
-      this.logger.log('All servers are in good condition.');
-      this.stopJob = true;
-    } else {
-      message +=
-        '\n⚠️ Some servers are not in good condition. Cron job will check again next time.';
-      this.logger.log(
-        'Some servers are not in good condition. Continuing job....',
+    try {
+      const channel = (await this.client.channels.fetch(
+        channelId,
+      )) as TextChannel;
+      if (!channel) {
+        this.logger.error(`Channel ${channelId} not found`);
+        return;
+      }
+      await channel.send({ content: message });
+      this.logger.debug(
+        `Message sent to channel ${channelId}: ${message.slice(0, 50)}...`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to send message to Discord: ${error.message}`,
+        error.stack,
       );
     }
-
-    return message;
   }
 }
